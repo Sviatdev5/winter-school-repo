@@ -109,7 +109,11 @@ python rl_agent/train.py
 
 ### 📂 Repository Structure
 ├── presentation/       # Winter School 2026 Slides (PDF)
+
 ├── prompt_examples/    # Few-shot, CoT, and ReAct prompt templates
+
 ├── local_models/       # Python integration for Ollama & LM Studio
+
 ├── games/              # Simple Python games created with LLMs
+
 └── rl_agent/           # RL algorithms and training scripts
