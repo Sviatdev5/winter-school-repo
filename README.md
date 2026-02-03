@@ -67,3 +67,47 @@ The practical component of this workshop puts theory into practice.
 3.  **Train the Agent:** Implement the training loop and teach your agent to beat the game!
 
 ---
+
+## 🚀 Getting Started
+
+### Prerequisites
+* Python 3.10+
+* [Ollama](https://ollama.com/download) or [LM Studio](https://lmstudio.ai/download)
+* Recommended libraries: `torch`, `gymnasium`, `pygame`, `ollama`
+
+### Installation
+
+```bash
+# Clone the repository
+git clone [https://github.com/your-username/winter-school-2026-rl.git](https://github.com/your-username/winter-school-2026-rl.git)
+cd winter-school-2026-rl
+
+# Install dependencies
+pip install -r requirements.txt
+Usage
+```
+
+### Running Local Model Examples:
+
+Bash
+python local_models/ollama_example.py
+Playing the "Vibe-Coded" Game:
+
+```bash
+python games/grid_coin_collector.py
+```
+
+### Training the RL Agent:
+
+(missing for now)
+
+```bash
+python rl_agent/train.py
+```
+
+### 📂 Repository Structure
+├── presentation/       # Winter School 2026 Slides (PDF)
+├── prompt_examples/    # Few-shot, CoT, and ReAct prompt templates
+├── local_models/       # Python integration for Ollama & LM Studio
+├── games/              # Simple Python games created with LLMs
+└── rl_agent/           # RL algorithms and training scripts
