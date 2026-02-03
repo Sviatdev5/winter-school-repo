@@ -84,15 +84,17 @@ cd winter-school-2026-rl
 
 # Install dependencies
 pip install -r requirements.txt
-Usage
 ```
+
+## Usage
 
 ### Running Local Model Examples:
 
-Bash
+```bash
 python local_models/ollama_example.py
-Playing the "Vibe-Coded" Game:
+```
 
+### Playing the "Vibe-Coded" Game:
 ```bash
 python games/grid_coin_collector.py
 ```
