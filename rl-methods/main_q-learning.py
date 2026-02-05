@@ -1,164 +1,202 @@
-import gymnasium as gym
-import numpy as np
+import pygame
 import random
+import numpy as np
 import time
-import matplotlib.pyplot as plt
-from tqdm import tqdm
 import os
 from datetime import datetime
-
-# Fix for macOS crash (zsh: trace trap)
-import matplotlib
-matplotlib.use('Agg') # Must be before importing pyplot
 import matplotlib.pyplot as plt
+from tqdm import tqdm
 
 # ==========================================
-# ⚙️ CONFIGURATION
+# ⚙️ Налаштування (Settings)
 # ==========================================
-ENV_NAME = "Taxi-v3"
-TRAIN_EPISODES = 2000
-MAX_STEPS = 100
-LEARNING_RATE = 0.7
-DISCOUNT_RATE = 0.95
-EPSILON_START = 1.0
-EPSILON_DECAY = 0.005
-EPSILON_MIN = 0.01
+WIDTH, HEIGHT = 400, 600
+FPS = 60
+SHIP_WIDTH, SHIP_HEIGHT = 40, 40
+ASTEROID_SIZE = 40
+ASTEROID_SPEED = 7
+MAX_ASTEROIDS = 3
 
-def save_plots(rewards):
-    """
-    Generates and saves a graph of the training progress.
-    """
-    plt.figure(figsize=(10, 5))
-    
-    # 1. Plot raw rewards (light blue)
-    plt.plot(rewards, color='cyan', alpha=0.3, label='Raw Reward')
-    
-    # 2. Calculate and plot Moving Average (dark blue)
-    # This smooths out the noise to show the actual learning trend
-    window_size = 50
-    if len(rewards) >= window_size:
-        moving_avg = np.convolve(rewards, np.ones(window_size)/window_size, mode='valid')
-        plt.plot(range(window_size-1, len(rewards)), moving_avg, color='blue', linewidth=2, label='Moving Avg (50 eps)')
+# Параметри дискретизації
+SHIP_BINS, AST_X_BINS, AST_Y_BINS = 10, 10, 15
 
-    plt.title(f"Agent Learning Progress ({ENV_NAME})")
-    plt.xlabel("Episode")
-    plt.ylabel("Total Reward")
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    
-    # 1. Define the directory path
-    folder_path = "rl-methods/experiments"
-    
-    # 2. Create the directory if it doesn't exist (CRITICAL STEP)
-    os.makedirs(folder_path, exist_ok=True)
-    
-    # 3. Generate a clean timestamp (YearMonthDay_HourMinuteSecond)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    
-    # 4. Save with the new dynamic filename
-    filename = f"{folder_path}/taxi_q-learning_metrics_{timestamp}.png"
-    
-    plt.savefig(filename)
-    print(f"📊 Metrics saved to {filename}")
-    plt.close()
+# Гіперпараметри RL
+TRAIN_EPISODES = 3000
+LEARNING_RATE, DISCOUNT_RATE = 0.1, 0.99
+EPSILON_START, EPSILON_DECAY, EPSILON_MIN = 1.0, 0.0005, 0.01
 
-def watch_agent(qtable=None, delay=0.1):
-    """
-    Runs one episode visually. 
-    """
-    env = gym.make(ENV_NAME, render_mode="human")
-    state, info = env.reset()
-    done = False
-    total_reward = 0
+# ==========================================
+# ⚡ Клас Середовища (Environment)
+# ==========================================
+class SpaceDodgerEnv:
+    def __init__(self):
+        self.action_space = 3 
+        self.reset()
     
-    print("\n🎬 Simulation Started...")
+    def reset(self):
+        self.ship_x = WIDTH // 2
+        self.ship_y = HEIGHT - SHIP_HEIGHT - 20
+        self.asteroids = [[random.randint(0, WIDTH-ASTEROID_SIZE), -random.randint(50, 600)] for _ in range(MAX_ASTEROIDS)]
+        return self._get_state()
     
-    for step in range(MAX_STEPS):
-        if qtable is None:
-            action = env.action_space.sample() # Untrained
-        else:
-            action = np.argmax(qtable[state, :]) # Trained
-            
-        new_state, reward, terminated, truncated, info = env.step(action)
-        total_reward += reward
-        done = terminated or truncated
-        state = new_state
+    def _get_state(self):
+        upcoming = [a for a in self.asteroids if a[1] < self.ship_y + SHIP_HEIGHT]
+        closest = min(upcoming, key=lambda a: abs(self.ship_y - a[1])) if upcoming else self.asteroids[0]
+        ship_bin = int(self.ship_x / WIDTH * (SHIP_BINS - 1))
+        ast_x_bin = int(closest[0] / WIDTH * (AST_X_BINS - 1))
+        ast_y_bin = int(max(0, min(closest[1], HEIGHT)) / HEIGHT * (AST_Y_BINS - 1))
+        return (ship_bin * AST_X_BINS * AST_Y_BINS) + (ast_x_bin * AST_Y_BINS) + ast_y_bin
+    
+    def step(self, action):
+        speed = 15
+        if action == 0:   self.ship_x = max(0, self.ship_x - speed)
+        elif action == 2: self.ship_x = min(WIDTH - SHIP_WIDTH, self.ship_x + speed)
         
-        time.sleep(delay)
+        done, reward = False, 0.1
+        for a in self.asteroids:
+            a[1] += ASTEROID_SPEED
+            if a[1] > HEIGHT:
+                a[0], a[1] = random.randint(0, WIDTH-ASTEROID_SIZE), -ASTEROID_SIZE
+                reward += 2.0
+        
+        ship_rect = pygame.Rect(self.ship_x, self.ship_y, SHIP_WIDTH, SHIP_HEIGHT)
+        for a in self.asteroids:
+            if ship_rect.colliderect(pygame.Rect(a[0], a[1], ASTEROID_SIZE, ASTEROID_SIZE)):
+                reward, done = -15, True
+        return self._get_state(), reward, done
+
+# ==========================================
+# 🎮 Режим гри (Ручний або ШІ)
+# ==========================================
+def run_game(env, qtable=None, manual=False):
+    pygame.init()
+    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    pygame.display.set_caption("Space Dodger: " + ("РУЧНЕ КЕРУВАННЯ" if manual else "ШТУЧНИЙ ІНТЕЛЕКТ"))
+    clock = pygame.time.Clock()
+    
+    try:
+        ship_img = pygame.transform.scale(pygame.image.load("ship.png").convert_alpha(), (SHIP_WIDTH, SHIP_HEIGHT))
+        ast_img = pygame.transform.scale(pygame.image.load("asteroid.png").convert_alpha(), (ASTEROID_SIZE, ASTEROID_SIZE))
+    except: 
+        ship_img = ast_img = None
+
+    state = env.reset()
+    running = True
+    while running:
+        action = 1 
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT: 
+                pygame.quit() # Важливо коректно закрити pygame
+                return False
+
+        if manual:
+            keys = pygame.key.get_pressed()
+            if keys[pygame.K_LEFT]: action = 0
+            elif keys[pygame.K_RIGHT]: action = 2
+        else:
+            action = np.argmax(qtable[state])
+
+        # Тут була помилка: замість self використовуємо env
+        state, _, done = env.step(action)
+
+        screen.fill((10, 10, 30))
+        
+        # Малюємо корабель, звертаючись до env
+        if ship_img: 
+            screen.blit(ship_img, (env.ship_x, env.ship_y))
+        else: 
+            pygame.draw.rect(screen, (0, 255, 0), (env.ship_x, env.ship_y, SHIP_WIDTH, SHIP_HEIGHT))
+        
+        # Малюємо астероїди, звертаючись до env
+        for a in env.asteroids:
+            if ast_img: 
+                screen.blit(ast_img, (a[0], a[1]))
+            else: 
+                pygame.draw.rect(screen, (255, 50, 50), (a[0], a[1], ASTEROID_SIZE, ASTEROID_SIZE))
+
+        pygame.display.flip()
+        clock.tick(FPS)
         
         if done:
-            break
+            if manual: print("💥 Бум! Спробуйте ще раз.")
+            state = env.reset()
             
-    print(f"🏁 Episode finished. Total Score: {total_reward}\n")
-    env.close()
+    pygame.quit()
+    pygame.init()
+    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    pygame.display.set_caption("Space Dodger: " + ("РУЧНЕ КЕРУВАННЯ" if manual else "ШТУЧНИЙ ІНТЕЛЕКТ"))
+    clock = pygame.time.Clock()
+    
+    try:
+        ship_img = pygame.transform.scale(pygame.image.load("ship.png").convert_alpha(), (SHIP_WIDTH, SHIP_HEIGHT))
+        ast_img = pygame.transform.scale(pygame.image.load("asteroid.png").convert_alpha(), (ASTEROID_SIZE, ASTEROID_SIZE))
+    except: ship_img = ast_img = None
 
-def train_agent():
-    """
-    Trains the agent and tracks rewards.
-    """
-    env = gym.make(ENV_NAME, render_mode=None)
-    
-    state_size = env.observation_space.n
-    action_size = env.action_space.n
-    qtable = np.zeros((state_size, action_size))
-    
-    epsilon = EPSILON_START
-    rewards_history = []  # 📉 To store metrics
+    state = env.reset()
+    running = True
+    while running:
+        action = 1 # За замовчуванням стоїмо
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT: return False
 
-    print(f"🔄 Training for {TRAIN_EPISODES} episodes...")
-    
+        if manual:
+            keys = pygame.key.get_pressed()
+            if keys[pygame.K_LEFT]: action = 0
+            elif keys[pygame.K_RIGHT]: action = 2
+        else:
+            action = np.argmax(qtable[state])
+
+        state, _, done = env.step(action)
+
+        screen.fill((10, 10, 30))
+        if ship_img: screen.blit(ship_img, (env.ship_x, env.ship_y))
+        else: pygame.draw.rect(screen, (0, 255, 0), (env.ship_x, env.ship_y, SHIP_WIDTH, SHIP_HEIGHT))
+        for a in self.asteroids:
+            if ast_img: screen.blit(ast_img, (a[0], a[1]))
+            else: pygame.draw.rect(screen, (255, 50, 50), (a[0], a[1], ASTEROID_SIZE, ASTEROID_SIZE))
+
+        pygame.display.flip()
+        clock.tick(FPS)
+        if done:
+            if manual: print("💥 Бум! Спробуйте ще раз."); state = env.reset()
+            else: state = env.reset()
+    pygame.quit()
+
+# ==========================================
+# 🧠 Навчання та Збереження
+# ==========================================
+def train_agent(env):
+    state_size = SHIP_BINS * AST_X_BINS * AST_Y_BINS
+    qtable = np.zeros((state_size, env.action_space))
+    epsilon, history = EPSILON_START, []
+
+    print(f"🚀 ШІ починає вчитися ({TRAIN_EPISODES} епізодів)...")
     for _ in tqdm(range(TRAIN_EPISODES)):
-        state, info = env.reset()
-        done = False
-        episode_reward = 0  # Track score for this specific game
-        
-        for _ in range(MAX_STEPS):
-            if random.uniform(0, 1) < epsilon:
-                action = env.action_space.sample()
-            else:
-                action = np.argmax(qtable[state, :])
-
-            new_state, reward, terminated, truncated, info = env.step(action)
-            
-            # Q-Learning Update
-            current_q = qtable[state, action]
-            max_future_q = np.max(qtable[new_state, :])
-            new_q = current_q + LEARNING_RATE * (reward + DISCOUNT_RATE * max_future_q - current_q)
-            qtable[state, action] = new_q
-            
-            state = new_state
-            episode_reward += reward
-            
-            if terminated or truncated:
-                break
-        
-        # End of Episode: Save metric and decay epsilon
-        rewards_history.append(episode_reward)
+        state, total_reward, done = env.reset(), 0, False
+        while not done:
+            action = random.randint(0, 2) if random.random() < epsilon else np.argmax(qtable[state])
+            next_state, reward, done = env.step(action)
+            qtable[state, action] += LEARNING_RATE * (reward + DISCOUNT_RATE * np.max(qtable[next_state]) - qtable[state, action])
+            state, total_reward = next_state, total_reward + reward
         epsilon = max(EPSILON_MIN, epsilon - EPSILON_DECAY)
-        
-    env.close()
+        history.append(total_reward)
     
-    # Save the plot now that training is done
-    save_plots(rewards_history)
-    
+    os.makedirs("space_dodger_rl", exist_ok=True)
+    np.save("space_dodger_rl/q_table.npy", qtable)
     return qtable
 
-# ==========================================
-# 🚀 MAIN EXECUTION
-# ==========================================
 if __name__ == "__main__":
-    print(f"🚕 Q-Learning with Metrics ({ENV_NAME})")
+    env = SpaceDodgerEnv()
     
-    # 1. Watch Random
-    input("\n❌ Press [Enter] to watch UNTRAINED agent...")
-    watch_agent(qtable=None, delay=0.1)
-    
-    # 2. Train & Plot
-    input("💪 Press [Enter] to TRAIN and generate plots...")
-    trained_qtable = train_agent()
-    print("✅ Training Complete! Check 'training_metrics.png'.")
+    print("🎮 КРОК 1: Спробуй керувати сам (Стрілки ВЛІВО/ВПРАВО).")
+    print("Закрий вікно гри, щоб перейти до навчання ШІ.")
+    run_game(env, manual=True)
 
-    # 3. Watch Trained
-    while True:
-        input("🏆 Press [Enter] to watch TRAINED agent...")
-        watch_agent(qtable=trained_qtable, delay=0.2)
+    path = "space_dodger_rl/q_table.npy"
+    qtable = np.load(path) if os.path.exists(path) else None
+
+    if qtable is None or input("\n🧠 Модель знайдена. Перенавчити? (y/n): ").lower() == 'y':
+        qtable = train_agent(env)
+
+    print("\n🏆 КРОК 2: Дивись, як грає ШІ!")
+    run_game(env, qtable=qtable, manual=False)
